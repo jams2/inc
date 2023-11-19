@@ -277,8 +277,8 @@ def emit_char2fixnum(si, arg, emit):
     emit(1 >> Line(f"shrq ${CHARSHIFT - FXSHIFT}, %rax"))
 
 
-def emit_boolcmp(emit):
-    emit(1 >> Line("sete %al") // "set al to 1 if last cmp was equal else 0")
+def emit_boolcmp(emit, cmp="e"):
+    emit(1 >> Line(f"set{cmp} %al"))
     emit(1 >> Line("movzbq %al, %rax") // "extend al to fill rax")
     emit(
         1
@@ -392,3 +392,146 @@ def desugar_or(expr):
             return rator
         case ["or", rator, *rest]:
             return ("if", rator, rator, desugar_or(["or", *rest]))
+
+
+def emit_binargs(si, arg1, arg2, emit):
+    """
+    eval arg1 and arg2.
+
+    arg1 result will be in <si>(%rsp), arg2 in %rax
+    """
+    emit_expr(si, arg1, emit)
+    emit_rax_save(si, emit)
+    emit_expr(si - WORDSIZE, arg2, emit)
+
+
+def emit_rax_save(si, emit):
+    emit(1 >> Line(f"movq %rax, {si}(%rsp)"))
+
+
+def emit_rax_restore(si, emit):
+    emit(1 >> Line(f"movq {si}(%rsp), %rax"))
+
+
+@primitive
+@scheme_name("fx+")
+def emit_fxplus(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"addq {si}(%rsp), %rax"))
+
+
+@primitive
+@scheme_name("fx-")
+def emit_fxminus(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"subq %rax, {si}(%rsp)"))
+    emit_rax_restore(si, emit)
+
+
+@primitive
+@scheme_name("fx*")
+def emit_fxmul(si, arg1, arg2, emit):
+    """
+    Input numbers are scaled by 4. This means multiplication is really
+    4x * 4y = 16xy, where we want 4x * 4y = 4xy.
+
+    Thus we implement multiplication as 4xy = (4x / 4) * 4y, using sarq to
+    implement the division.
+    """
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"sarq ${FXSHIFT}, {si}(%rsp)"))
+    emit(1 >> Line(f"imulq {si}(%rsp), %rax"))
+
+
+@primitive
+@scheme_name("fxlogand")
+def emit_fxlogand(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"andq {si}(%rsp), %rax"))
+
+
+@primitive
+@scheme_name("fxlogor")
+def emit_fxlogor(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"orq {si}(%rsp), %rax"))
+
+
+@predicate
+@primitive
+@scheme_name("fx=")
+def emit_fxequal(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"cmpq {si}(%rsp), %rax"))
+    emit_boolcmp(emit)
+
+
+@predicate
+@primitive
+@scheme_name("fx<")
+def emit_fxlt(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"cmpq %rax, {si}(%rsp)"))
+    emit_boolcmp(emit, "l")
+
+
+@predicate
+@primitive
+@scheme_name("fx<=")
+def emit_fxlte(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"cmpq %rax, {si}(%rsp)"))
+    emit_boolcmp(emit, "le")
+
+
+@predicate
+@primitive
+@scheme_name("fx>")
+def emit_fxgt(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"cmpq %rax, {si}(%rsp)"))
+    emit_boolcmp(emit, "g")
+
+
+@predicate
+@primitive
+@scheme_name("fx>=")
+def emit_fxgte(si, arg1, arg2, emit):
+    emit_binargs(si, arg1, arg2, emit)
+    emit(1 >> Line(f"cmpq %rax, {si}(%rsp)"))
+    emit_boolcmp(emit, "ge")
+
+
+@predicate
+@primitive
+@scheme_name("char=")
+def emit_charequal(si, arg1, arg2, emit):
+    emit_fxequal(si, arg1, arg2, emit)
+
+
+@predicate
+@primitive
+@scheme_name("char<")
+def emit_charlt(si, arg1, arg2, emit):
+    emit_fxlt(si, arg1, arg2, emit)
+
+
+@predicate
+@primitive
+@scheme_name("char<=")
+def emit_charlte(si, arg1, arg2, emit):
+    emit_fxlte(si, arg1, arg2, emit)
+
+
+@predicate
+@primitive
+@scheme_name("char>")
+def emit_chargt(si, arg1, arg2, emit):
+    emit_fxgt(si, arg1, arg2, emit)
+
+
+@predicate
+@primitive
+@scheme_name("char>=")
+def emit_chargte(si, arg1, arg2, emit):
+    emit_fxgte(si, arg1, arg2, emit)

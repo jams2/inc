@@ -4,6 +4,8 @@ import pytest
 @pytest.mark.parametrize(
     ("program", "out"),
     [
+        [2305843009213693951, "2305843009213693951\n"],
+        [2147483648, "2147483648\n"],
         [False, "#f\n"],
         [True, "#t\n"],
         [(), "()\n"],
