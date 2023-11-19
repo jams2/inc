@@ -112,11 +112,14 @@ def scheme_name(name):
     return decorator
 
 
+PRIMCALL_REQUIRED_ARGS = 2
+
+
 def primitive(f):
     PRIMITIVES.update(
         {
             f._scheme_name: {
-                "nargs": f.__code__.co_argcount - 1,
+                "nargs": f.__code__.co_argcount - PRIMCALL_REQUIRED_ARGS,
                 "emitter": f,
             }
         }
@@ -168,6 +171,14 @@ def is_primcall(x):
             return False
 
 
+def is_predicate_call(x):
+    match x:
+        case (rator, *_):
+            return rator in PRIMITIVES and rator in PREDICATES
+        case _:
+            return False
+
+
 def is_if(x):
     match x:
         case ("if", _, _, _):
@@ -193,8 +204,14 @@ def is_or(x):
 
 
 def emit_program(p, emit):
+    emit_function_header("L_scheme_entry", emit)
+    emit_expr(-WORDSIZE, p, emit)
+    emit(1 >> Line("ret"))
     emit_function_header("scheme_entry", emit)
-    emit_expr(p, emit)
+    emit(1 >> Line("movq %rsp, %rcx") // "save the C stack pointer")
+    emit(1 >> Line("movq %rdi, %rsp") // "rdi has the stack_base arg")
+    emit(1 >> Line("call L_scheme_entry"))
+    emit(1 >> Line("movq %rcx, %rsp") // "restore the C stack pointer")
     emit(1 >> Line("ret"))
 
 
@@ -205,17 +222,17 @@ def emit_function_header(name, emit):
     emit(Line(f"{name}:"))
 
 
-def emit_expr(expr, emit):
+def emit_expr(si, expr, emit):
     if is_immediate(expr):
         emit_immediate(expr, emit)
     elif is_primcall(expr):
-        emit_primcall(expr, emit)
+        emit_primcall(si, expr, emit)
     elif is_if(expr):
-        emit_if(expr, emit)
+        emit_if(si, expr, emit)
     elif is_and(expr):
-        emit_expr(desugar_and(expr), emit)
+        emit_expr(si, desugar_and(expr), emit)
     elif is_or(expr):
-        emit_expr(desugar_or(expr), emit)
+        emit_expr(si, desugar_or(expr), emit)
     else:
         raise ValueError(f"Unknown expression: {expr}")
 
@@ -224,39 +241,39 @@ def emit_immediate(x, emit):
     emit(1 >> Line(f"movq ${immediate_rep(x)}, %rax"))
 
 
-def emit_primcall(x, emit):
+def emit_primcall(si, x, emit):
     primitive = PRIMITIVES[x[0]]
     if len(x[1:]) != primitive["nargs"]:
         raise TypeError(f"{x[0]}: wrong number of args")
-    return primitive["emitter"](*x[1:], emit)
+    return primitive["emitter"](si, *x[1:], emit)
 
 
 @primitive
 @scheme_name("fxadd1")
-def emit_fxadd1(arg, emit):
-    emit_expr(arg, emit)
+def emit_fxadd1(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"addq ${immediate_rep(1)}, %rax"))
 
 
 @primitive
 @scheme_name("fxsub1")
-def emit_fxsub1(arg, emit):
-    emit_expr(arg, emit)
+def emit_fxsub1(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"subq ${immediate_rep(1)}, %rax"))
 
 
 @primitive
 @scheme_name("fixnum->char")
-def emit_fixnum2char(arg, emit):
-    emit_expr(arg, emit)
+def emit_fixnum2char(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"shlq ${CHARSHIFT - FXSHIFT}, %rax"))
     emit(1 >> Line(f"orq ${CHARTAG}, %rax"))
 
 
 @primitive
 @scheme_name("char->fixnum")
-def emit_char2fixnum(arg, emit):
-    emit_expr(arg, emit)
+def emit_char2fixnum(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"shrq ${CHARSHIFT - FXSHIFT}, %rax"))
 
 
@@ -278,8 +295,8 @@ def emit_boolcmp(emit):
 @predicate
 @primitive
 @scheme_name("null?")
-def emit_nullp(arg, emit):
-    emit_expr(arg, emit)
+def emit_nullp(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"cmp ${NULL}, %rax"))
     emit_boolcmp(emit)
 
@@ -287,8 +304,8 @@ def emit_nullp(arg, emit):
 @predicate
 @primitive
 @scheme_name("fixnum?")
-def emit_fixnump(arg, emit):
-    emit_expr(arg, emit)
+def emit_fixnump(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"andq ${FXMASK}, %rax"))
     emit(1 >> Line(f"cmp ${FXTAG}, %rax"))
     emit_boolcmp(emit)
@@ -297,8 +314,8 @@ def emit_fixnump(arg, emit):
 @predicate
 @primitive
 @scheme_name("fxzero?")
-def emit_fxzerop(arg, emit):
-    emit_expr(arg, emit)
+def emit_fxzerop(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"cmp ${FXTAG}, %rax") // "0 is all zeros")
     emit_boolcmp(emit)
 
@@ -306,8 +323,8 @@ def emit_fxzerop(arg, emit):
 @predicate
 @primitive
 @scheme_name("boolean?")
-def emit_booleanp(arg, emit):
-    emit_expr(arg, emit)
+def emit_booleanp(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"and ${BOOL_MASK}, %al") // "F & F and F & T both evaluate to F")
     emit(1 >> Line(f"cmp ${BOOL_F}, %al"))
     emit_boolcmp(emit)
@@ -316,8 +333,8 @@ def emit_booleanp(arg, emit):
 @predicate
 @primitive
 @scheme_name("char?")
-def emit_charp(arg, emit):
-    emit_expr(arg, emit)
+def emit_charp(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"and ${CHARMASK}, %al"))
     emit(1 >> Line(f"cmp ${CHARTAG}, %al"))
     emit_boolcmp(emit)
@@ -325,34 +342,34 @@ def emit_charp(arg, emit):
 
 @primitive
 @scheme_name("not")
-def emit_not(arg, emit):
-    emit_expr(arg, emit)
+def emit_not(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line(f"cmp ${BOOL_F}, %al"))
     emit_boolcmp(emit)
 
 
 @primitive
 @scheme_name("fxlognot")
-def emit_fxlognot(arg, emit):
-    emit_expr(arg, emit)
+def emit_fxlognot(si, arg, emit):
+    emit_expr(si, arg, emit)
     emit(1 >> Line("not %rax"))
     emit(1 >> Line("and $0xFC, %al") // "reset the tag bits")
 
 
-def emit_if(program, emit):
+def emit_if(si, program, emit):
     _, test, consequent, alternative = program
     alt_label = Label.unique()
     end_label = Label.unique()
     emit(Line() // f"begin if {alt_label} {end_label}")
     # TODO: (if (fxzero? e0) conseq alt) causes an extra comparison,
     # and extra work creating a #t or #f value that we don't use
-    emit_expr(test, emit)
+    emit_expr(si, test, emit)
     emit(1 >> Line(f"cmp ${BOOL_F}, %al") // "compare result of test to False")
     emit(1 >> Line(f"je {alt_label}") // "jump to alt if False")
-    emit_expr(consequent, emit)
+    emit_expr(si, consequent, emit)
     emit(1 >> Line(f"jmp {end_label}"))
     emit(Line(f"{alt_label}:"))
-    emit_expr(alternative, emit)
+    emit_expr(si, alternative, emit)
     emit(Line(f"{end_label}:"))
     emit(Line() // f"end if {alt_label} {end_label}")
 

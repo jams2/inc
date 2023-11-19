@@ -2,7 +2,7 @@
 
 typedef uint64_t ptr;
 
-extern ptr scheme_entry();
+extern ptr scheme_entry(char *);
 
 #define fxshift 2
 #define fxmask 0x03
