@@ -89,7 +89,7 @@ BOOL_T = 0x6F
 BOOL_BIT = 6
 BOOL_MASK = 0xBF  # BOOL_MASK & (T or F) give F. Doesn't clash with null
 NULL = 0x3F
-WORDSIZE = 4  # bytes
+WORDSIZE = 8  # bytes
 
 FIXNUM_BITS = WORDSIZE * 8 - FXSHIFT
 FXLOWER = -(2 ** (FIXNUM_BITS - 1))
@@ -221,7 +221,7 @@ def emit_expr(expr, emit):
 
 
 def emit_immediate(x, emit):
-    emit(1 >> Line(f"movl ${immediate_rep(x)}, %eax"))
+    emit(1 >> Line(f"movq ${immediate_rep(x)}, %rax"))
 
 
 def emit_primcall(x, emit):
@@ -235,34 +235,34 @@ def emit_primcall(x, emit):
 @scheme_name("fxadd1")
 def emit_fxadd1(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"addl ${immediate_rep(1)}, %eax"))
+    emit(1 >> Line(f"addq ${immediate_rep(1)}, %rax"))
 
 
 @primitive
 @scheme_name("fxsub1")
 def emit_fxsub1(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"subl ${immediate_rep(1)}, %eax"))
+    emit(1 >> Line(f"subq ${immediate_rep(1)}, %rax"))
 
 
 @primitive
 @scheme_name("fixnum->char")
 def emit_fixnum2char(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"shll ${CHARSHIFT - FXSHIFT}, %eax"))
-    emit(1 >> Line(f"orl ${CHARTAG}, %eax"))
+    emit(1 >> Line(f"shlq ${CHARSHIFT - FXSHIFT}, %rax"))
+    emit(1 >> Line(f"orq ${CHARTAG}, %rax"))
 
 
 @primitive
 @scheme_name("char->fixnum")
 def emit_char2fixnum(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"shrl ${CHARSHIFT - FXSHIFT}, %eax"))
+    emit(1 >> Line(f"shrq ${CHARSHIFT - FXSHIFT}, %rax"))
 
 
 def emit_boolcmp(emit):
     emit(1 >> Line("sete %al") // "set al to 1 if last cmp was equal else 0")
-    emit(1 >> Line("movzbl %al, %eax") // "extend al to fill eax")
+    emit(1 >> Line("movzbq %al, %rax") // "extend al to fill rax")
     emit(
         1
         >> Line(f"sal ${BOOL_BIT}, %al")
@@ -280,7 +280,7 @@ def emit_boolcmp(emit):
 @scheme_name("null?")
 def emit_nullp(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"cmp ${NULL}, %eax"))
+    emit(1 >> Line(f"cmp ${NULL}, %rax"))
     emit_boolcmp(emit)
 
 
@@ -289,8 +289,8 @@ def emit_nullp(arg, emit):
 @scheme_name("fixnum?")
 def emit_fixnump(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"and ${FXMASK}, %eax"))
-    emit(1 >> Line(f"cmp ${FXTAG}, %eax"))
+    emit(1 >> Line(f"andq ${FXMASK}, %rax"))
+    emit(1 >> Line(f"cmp ${FXTAG}, %rax"))
     emit_boolcmp(emit)
 
 
@@ -299,7 +299,7 @@ def emit_fixnump(arg, emit):
 @scheme_name("fxzero?")
 def emit_fxzerop(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line(f"cmp ${FXTAG}, %eax") // "0 is all zeros")
+    emit(1 >> Line(f"cmp ${FXTAG}, %rax") // "0 is all zeros")
     emit_boolcmp(emit)
 
 
@@ -335,7 +335,7 @@ def emit_not(arg, emit):
 @scheme_name("fxlognot")
 def emit_fxlognot(arg, emit):
     emit_expr(arg, emit)
-    emit(1 >> Line("not %eax"))
+    emit(1 >> Line("not %rax"))
     emit(1 >> Line("and $0xFC, %al") // "reset the tag bits")
 
 
@@ -344,6 +344,8 @@ def emit_if(program, emit):
     alt_label = Label.unique()
     end_label = Label.unique()
     emit(Line() // f"begin if {alt_label} {end_label}")
+    # TODO: (if (fxzero? e0) conseq alt) causes an extra comparison,
+    # and extra work creating a #t or #f value that we don't use
     emit_expr(test, emit)
     emit(1 >> Line(f"cmp ${BOOL_F}, %al") // "compare result of test to False")
     emit(1 >> Line(f"je {alt_label}") // "jump to alt if False")

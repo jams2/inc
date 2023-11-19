@@ -3,7 +3,7 @@
 
 void print_ptr_rec(ptr x) {
   if ((x & fxmask) == fxtag) {
-    printf("%d", ((int)x) >> fxshift);
+    printf("%ld", ((int64_t)x) >> fxshift);
   } else if (x == bool_f) {
     printf("#f");
   } else if (x == bool_t) {
