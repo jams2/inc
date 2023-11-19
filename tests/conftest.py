@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from compiler import emit_program, Writer
+from compiler import Writer, emit_program
 
 
 @pytest.fixture()
@@ -19,7 +19,7 @@ def compile_and_run(tmp_path, project_root):
         object_file = tmp_path / "program.o"
         binary = tmp_path / "test"
         with Writer(asm_file) as writer:
-            emit_program(program, writer)
+            emit_program(program, writer.write)
 
         subprocess.run(["gcc", "-c", asm_file, "-o", object_file], check=True)
         subprocess.run(["gcc", startup, object_file, "-o", binary], check=True)

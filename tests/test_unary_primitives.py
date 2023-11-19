@@ -1,7 +1,5 @@
 import pytest
 
-from compiler import FXLOWER, FXUPPER
-
 
 @pytest.mark.parametrize(
     ("program", "out"),
@@ -75,4 +73,132 @@ def test_fixnum2char(program, out, compile_and_run):
     ],
 )
 def test_char2fixnum(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("null?", ()), "#t\n"],
+        [("null?", False), "#f\n"],
+        [("null?", True), "#f\n"],
+        [("null?", ("null?", ())), "#f\n"],
+        [("null?", "a"), "#f\n"],
+        [("null?", 0), "#f\n"],
+        [("null?", -10), "#f\n"],
+        [("null?", 10), "#f\n"],
+    ],
+)
+def test_nullp(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("fixnum?", 0), "#t\n"],
+        [("fixnum?", 1), "#t\n"],
+        [("fixnum?", -1), "#t\n"],
+        [("fixnum?", 37287), "#t\n"],
+        [("fixnum?", -23873), "#t\n"],
+        [("fixnum?", 536870911), "#t\n"],
+        [("fixnum?", -536870912), "#t\n"],
+        [("fixnum?", True), "#f\n"],
+        [("fixnum?", False), "#f\n"],
+        [("fixnum?", ()), "#f\n"],
+        [("fixnum?", "Q"), "#f\n"],
+        [("fixnum?", ("fixnum?", 12)), "#f\n"],
+        [("fixnum?", ("fixnum?", False)), "#f\n"],
+        [("fixnum?", ("fixnum?", "A")), "#f\n"],
+        [("fixnum?", ("char->fixnum", "r")), "#t\n"],
+        [("fixnum?", ("fixnum->char", 12)), "#f\n"],
+    ],
+)
+def test_fixnump(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("fxzero?", 0), "#t\n"],
+        [("fxzero?", 1), "#f\n"],
+        [("fxzero?", -1), "#f\n"],
+        [("fxzero?", 64), "#f\n"],
+        [("fxzero?", 960), "#f\n"],
+    ],
+)
+def test_fxzerop(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("boolean?", True), "#t\n"],
+        [("boolean?", False), "#t\n"],
+        [("boolean?", 0), "#f\n"],
+        [("boolean?", 1), "#f\n"],
+        [("boolean?", -1), "#f\n"],
+        [("boolean?", ()), "#f\n"],
+        [("boolean?", "a"), "#f\n"],
+        [("boolean?", ("boolean?", 0)), "#t\n"],
+        [("boolean?", ("fixnum?", ("boolean?", 0))), "#t\n"],
+    ],
+)
+def test_booleanp(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("char?", "a"), "#t\n"],
+        [("char?", "Z"), "#t\n"],
+        [("char?", "\n"), "#t\n"],
+        [("char?", True), "#f\n"],
+        [("char?", False), "#f\n"],
+        [("char?", ()), "#f\n"],
+        [("char?", ("char?", True)), "#f\n"],
+        [("char?", 0), "#f\n"],
+        [("char?", 23870), "#f\n"],
+        [("char?", -23789), "#f\n"],
+    ],
+)
+def test_charp(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("not", True), "#f\n"],
+        [("not", False), "#t\n"],
+        [("not", 15), "#f\n"],
+        [("not", ()), "#f\n"],
+        [("not", "A"), "#f\n"],
+        [("not", ("not", True)), "#t\n"],
+        [("not", ("not", False)), "#f\n"],
+        [("not", ("not", 15)), "#t\n"],
+        [("not", ("fixnum?", 15)), "#f\n"],
+        [("not", ("fixnum?", False)), "#t\n"],
+    ],
+)
+def test_not(program, out, compile_and_run):
+    assert compile_and_run(program) == out
+
+
+@pytest.mark.parametrize(
+    ("program", "out"),
+    [
+        [("fxlognot", 0), "-1\n"],
+        [("fxlognot", -1), "0\n"],
+        [("fxlognot", 1), "-2\n"],
+        [("fxlognot", -2), "1\n"],
+        [("fxlognot", 536870911), "-536870912\n"],
+        [("fxlognot", -536870912), "536870911\n"],
+        [("fxlognot", ("fxlognot", 237463)), "237463\n"],
+    ],
+)
+def test_fxlognot(program, out, compile_and_run):
     assert compile_and_run(program) == out
