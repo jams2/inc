@@ -1,5 +1,7 @@
 import pytest
 
+from compiler import FXUPPER
+
 
 @pytest.mark.parametrize(
     ("program", "out"),
@@ -309,6 +311,7 @@ def test_char_comparisons(program, out, compile_and_run):
         (["fx*", 1, 1], "1\n"),
         (["fx*", -1, 1], "-1\n"),
         (["fx*", -1, -1], "1\n"),
+        (["fx*", (FXUPPER - 1) // 2, 2], f"{FXUPPER - 1}\n"),
     ],
 )
 def test_fxmul(program, out, compile_and_run):
