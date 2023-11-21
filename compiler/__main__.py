@@ -15,6 +15,7 @@ if len(sys.argv) == 2 and sys.argv[1] in ("-p", "--print-asm"):
         StdoutWriter().write,
     )
 else:
+    sys.modules[__name__].__dict__.update({c: Var(c) for c in ("x", "y", "t")})
     with tempfile.TemporaryDirectory() as tmpdirname:
         asmfile = os.path.join(tmpdirname, "stst.s")
         binfile = os.path.join(tmpdirname, "stst")

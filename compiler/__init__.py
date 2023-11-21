@@ -1,5 +1,8 @@
 import string
 import sys
+from dataclasses import dataclass
+
+# -- Output
 
 
 class Line:
@@ -102,6 +105,11 @@ CHARMASK = 0x3F
 
 PRIMITIVES = {}
 PREDICATES = set()
+
+
+@dataclass
+class Var:
+    name: str
 
 
 def next_stack_index(si):
@@ -207,9 +215,32 @@ def is_or(x):
             return False
 
 
+def is_let(x):
+    match x:
+        case ("let", ([_, _], *_), _):
+            return True
+        case _:
+            return False
+
+
+def is_let_star(x):
+    match x:
+        case ("let*", ([_, _], *_), _):
+            return True
+        case _:
+            return False
+
+
+def is_variable(x):
+    return isinstance(x, Var)
+
+
+EMPTY_ENV = []
+
+
 def emit_program(p, emit):
     emit_function_header("L_scheme_entry", emit)
-    emit_expr(-WORDSIZE, p, emit)
+    emit_expr(-WORDSIZE, EMPTY_ENV, p, emit)
     emit(1 >> Line("ret"))
     emit_function_header("scheme_entry", emit)
     emit(1 >> Line("movq %rsp, %rcx") // "save the C stack pointer")
@@ -229,6 +260,8 @@ def emit_function_header(name, emit):
 def emit_expr(si, env, expr, emit):
     if is_immediate(expr):
         emit_immediate(expr, emit)
+    elif is_variable(expr):
+        emit_variable_ref(env, expr, emit)
     elif is_primcall(expr):
         emit_primcall(si, env, expr, emit)
     elif is_if(expr):
@@ -237,6 +270,10 @@ def emit_expr(si, env, expr, emit):
         emit_expr(si, env, desugar_and(expr), emit)
     elif is_or(expr):
         emit_expr(si, env, desugar_or(expr), emit)
+    elif is_let(expr):
+        emit_let(si, env, expr, emit)
+    elif is_let_star(expr):
+        emit_let_star(si, env, expr, emit)
     else:
         raise ValueError(f"Unknown expression: {expr}")
 
@@ -539,3 +576,54 @@ def emit_chargt(si, env, arg1, arg2, emit):
 @scheme_name("char>=")
 def emit_chargte(si, env, arg1, arg2, emit):
     emit_fxgte(si, env, arg1, arg2, emit)
+
+
+def emit_let(si, env, expr, emit):
+    def process_let(bindings, si, new_env):
+        match bindings:
+            case []:
+                return emit_expr(si, new_env, expr[2], emit)
+            case [(lhs, rhs), *rest]:
+                if not isinstance(lhs, Var):
+                    raise ValueError("lhs of let binding must be a Var")
+                emit_expr(si, env, rhs, emit)
+                emit_stack_save(si, emit)
+                return process_let(
+                    rest, next_stack_index(si), extend_env(lhs, si, new_env)
+                )
+
+    return process_let(expr[1], si, env)
+
+
+def emit_let_star(si, env, expr, emit):
+    def process_let_star(bindings, si, new_env):
+        match bindings:
+            case []:
+                return emit_expr(si, new_env, expr[2], emit)
+            case [(lhs, rhs), *rest]:
+                if not isinstance(lhs, Var):
+                    raise ValueError("lhs of let binding must be a Var")
+                emit_expr(si, new_env, rhs, emit)
+                emit_stack_save(si, emit)
+                return process_let_star(
+                    rest, next_stack_index(si), extend_env(lhs, si, new_env)
+                )
+
+    return process_let_star(expr[1], si, env)
+
+
+def extend_env(var, si, env):
+    return [(var, si), *env]
+
+
+def lookup(var, env):
+    for x, si in env:
+        if x == var:
+            return si
+
+
+def emit_variable_ref(env, expr, emit):
+    if (si := lookup(expr, env)) is not None:
+        emit_stack_load(si, emit)
+    else:
+        raise TypeError(f"Unbound {expr}")
