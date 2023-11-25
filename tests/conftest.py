@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from compiler import FileWriter, emit_program
+from compiler import emit_program
+from compiler.io import FileWriter
 
 
 @pytest.fixture()

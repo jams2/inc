@@ -5,7 +5,8 @@ import subprocess
 import sys
 import tempfile
 
-from compiler import FileWriter, StdoutWriter, Var, emit_program
+from compiler import Var, emit_program
+from compiler.io import FileWriter, StdoutWriter
 
 project_dir = pathlib.Path(__file__).parent.parent
 
@@ -14,7 +15,7 @@ builtins = {
     "letrec": "letrec",
     "f": "f",
     "g": "g",
-    **{c: Var(c) for c in ("x", "y", "t")},
+    **{c: Var(c) for c in ("a", "b", "x", "y", "t")},
 }
 
 
