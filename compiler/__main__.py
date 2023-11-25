@@ -58,7 +58,8 @@ def main():
             program = clean(f.read())
 
     if args.print:
-        emit_program(eval(program, builtins), StdoutWriter().write)
+        with StdoutWriter() as writer:
+            emit_program(eval(program, builtins), writer.write)
     else:
         with tempfile.TemporaryDirectory() as tmpdirname:
             asmfile = os.path.join(tmpdirname, "stst.s")
