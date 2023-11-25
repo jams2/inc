@@ -655,7 +655,7 @@ def emit_app(si, env, expr, tail, emit):
         match args:
             case first, *rest:
                 emit_expr(si, env, first, tail=False, emit=emit)
-                emit_stack_save(si, emit)
+                emit_stack_save(si, emit, comment="save arg on stack")
                 return emit_arguments(next_stack_index(si), rest)
             case _:
                 return
@@ -668,10 +668,12 @@ def emit_app(si, env, expr, tail, emit):
     )
     if tail:
         # shift the args from (si + WORDSIZE)... down to -WORDSIZE(%rsp)...
+        emit(1 >> Line() // "begin TCO")
         for i in range(1, len(args) + 1):
+            emit(1 >> Line() // f"shift arg {i} to local {i} position")
             emit(1 >> Line(f"movq {si - i * WORDSIZE}(%rsp), %rax"))
             emit(1 >> Line(f"movq %rax, {-i * WORDSIZE}(%rsp)"))
-        emit(1 >> Line(f"jmp {lookup(rator, env)}"))
+        emit(1 >> Line(f"jmp {lookup(rator, env)}") // "end TCO")
     else:
         # adjust rsp so call puts the return address in the empty cell
         emit_adjust_base(si + WORDSIZE, emit)
