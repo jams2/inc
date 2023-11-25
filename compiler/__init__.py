@@ -49,6 +49,11 @@ CHARSHIFT = 8
 CHARTAG = 0x0F
 CHARMASK = 0x3F
 
+PAIR_TAG = 1
+OBJ_MASK = 7
+CAR_OFFSET = 0
+CDR_OFFSET = 8
+
 PRIMITIVES = {}
 PREDICATES = set()
 
@@ -217,10 +222,33 @@ def make_initial_env(vars=None, vals=None):
 
 def emit_program(p, emit):
     emit_function_header("scheme_entry", emit)
-    emit(1 >> Line("movq %rsp, %rcx") // "save the C stack pointer")
-    emit(1 >> Line("movq %rdi, %rsp") // "rdi has the stack_base arg")
+    emit(Line() // "%rdi: Context")
+    emit(Line() // "%rsi: stack base")
+    emit(Line() // "%rdx: stack base")
+
+    emit(1 >> Line("movq %rdi, %rcx") // "store Context location")
+    emit(1 >> Line() // "preserve startup register state")
+    emit(1 >> Line("movq %rbx, 8(%rcx)"))
+    emit(1 >> Line("movq %rbp, 48(%rcx)"))
+    emit(1 >> Line("movq %rsp, 56(%rcx)"))
+    emit(1 >> Line("movq %r12, 96(%rcx)"))
+    emit(1 >> Line("movq %r13, 104(%rcx)"))
+    emit(1 >> Line("movq %r14, 112(%rcx)"))
+    emit(1 >> Line("movq %r15, 120(%rcx)"))
+
+    emit(1 >> Line("movq %rsi, %rsp") // "load stack base")
+    emit(1 >> Line("movq %rdx, %rbp") // "load allocation pointer")
     emit(1 >> Line("call L_scheme_entry"))
-    emit(1 >> Line("movq %rcx, %rsp") // "restore the C stack pointer")
+
+    emit(1 >> Line() // "restore startup state")
+    emit(1 >> Line("movq 8(%rcx), %rbx"))
+    emit(1 >> Line("movq 48(%rcx), %rbp"))
+    emit(1 >> Line("movq 56(%rcx), %rsp"))
+    emit(1 >> Line("movq 96(%rcx), %r12"))
+    emit(1 >> Line("movq 104(%rcx), %r13"))
+    emit(1 >> Line("movq 112(%rcx), %r14"))
+    emit(1 >> Line("movq 120(%rcx), %r15"))
+
     emit_ret(emit)
     if is_letrec(p):
         emit_letrec(p, emit)
@@ -578,6 +606,23 @@ def emit_chargte(si, env, arg1, arg2, emit):
     emit_fxgte(si, env, arg1, arg2, emit)
 
 
+@primitive
+@scheme_name("cons")
+def emit_cons(si, env, a, d, emit):
+    emit_expr(si, env, a, tail=False, emit=emit)
+    emit_stack_save(si, emit)
+    emit_expr(next_stack_index(si), env, d, tail=False, emit=emit)
+    emit_stack_save(next_stack_index(si), emit)
+
+    emit_stack_load(si, emit)
+    emit(1 >> Line(f"movq %rax, {CAR_OFFSET}(%rbp)") // "store car on heap")
+    emit_stack_load(next_stack_index(si), emit)
+    emit(1 >> Line(f"movq %rax, {CDR_OFFSET}(%rbp)") // "store cdr on heap")
+    emit(1 >> Line("movq %rbp, %rax") // "store pair address in rax")
+    emit(1 >> Line(f"orq ${PAIR_TAG}, %rax"))
+    emit(1 >> Line(f"add ${2 * CDR_OFFSET}, %rbp"))
+
+
 def emit_let(si, env, expr, tail, emit):
     def process_let(bindings, si, new_env):
         match bindings:
@@ -661,7 +706,7 @@ def emit_app(si, env, expr, tail, emit):
                 return
 
     rator, *args = expr
-    emit(1 >> Line() // f"begin {lookup(rator, env)} ({rator}) prologue")
+    emit(1 >> Line() // f"{lookup(rator, env)} ({rator}) prologue")
     emit_arguments(
         next_stack_index(si),  # leave one cell empty for the return address
         args,

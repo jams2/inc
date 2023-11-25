@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 void print_ptr_rec(ptr x) {
-  if ((x & fxmask) == fxtag) {
+  if (is_fixnum(x)) {
     printf("%ld", ((int64_t)x) >> fxshift);
   } else if (x == bool_f) {
     printf("#f");
@@ -12,7 +12,7 @@ void print_ptr_rec(ptr x) {
     printf("#t");
   } else if (x == null) {
     printf("()");
-  } else if ((x & chrmask) == chrtag) {
+  } else if (is_char(x)) {
     int c = x >> chrshift;
     if (c == char_tab) {
       printf("#\\tab");
@@ -29,6 +29,28 @@ void print_ptr_rec(ptr x) {
     } else {
       printf("#\\%c", c);
     }
+  } else if (is_pair(x)) {
+    ptr current = x;
+    ptr a = car(x);
+    ptr d = cdr(x);
+
+    printf("(");
+    for (;;) {
+      print_ptr_rec(a);
+      if (is_pair(d)) {
+	printf(" ");
+	current = d;
+	a = car(current);
+	d = cdr(current);
+      } else if (d == null) {
+	break;
+      } else {
+	printf(" . ");
+	print_ptr_rec(d);
+	break;
+      }
+    }
+    printf(")");
   }
 }
 
@@ -71,10 +93,13 @@ static void deallocate_protected_space(char *p, int size) {
 }
 
 int main() {
-  int stack_size = 16 * 4096;	/* Holds 16K cells */
+  Context ctx;
+  int stack_size = 16 * 4096; /* Holds 16K cells */
   char *stack_top = allocate_protected_space(stack_size);
   char *stack_base = stack_top + stack_size;
-  print_ptr(scheme_entry(stack_base));
+  char *heap = allocate_protected_space(stack_size);
+  print_ptr(scheme_entry(&ctx, stack_base, heap));
   deallocate_protected_space(stack_top, stack_size);
+  deallocate_protected_space(heap, stack_size);
   return 0;
 }

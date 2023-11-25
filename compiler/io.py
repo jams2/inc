@@ -12,9 +12,9 @@ class Line:
     def __str__(self):
         if self.comment:
             if self.text:
-                out = f"{self.text}  {self.comment}\n"
+                out = f"{self.text}  # {self.comment}\n"
             else:
-                out = f"{self.comment}\n"
+                out = f"# {self.comment}\n"
         else:
             out = f"{self.text}\n"
         return f"{self.indents * self.INDENT}{out}"
@@ -36,7 +36,7 @@ class Line:
 
     def __floordiv__(self, other):
         return self.__class__(
-            text=self.text, comment=f"{self.comment}# {other}", indents=self.indents
+            text=self.text, comment=other, indents=self.indents
         )
 
 
