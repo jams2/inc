@@ -1,6 +1,7 @@
 import string
 import sys
 from dataclasses import dataclass
+from itertools import count
 
 # -- Output
 
@@ -39,7 +40,9 @@ class Line:
         return self >> other
 
     def __floordiv__(self, other):
-        return self.__class__(text=self.text, comment=f"{self.comment}# {other}", indents=self.indents)
+        return self.__class__(
+            text=self.text, comment=f"{self.comment}# {other}", indents=self.indents
+        )
 
 
 class Writer:
@@ -259,26 +262,64 @@ def is_variable(x):
     return isinstance(x, Var)
 
 
-EMPTY_ENV = []
+def is_letrec(x):
+    match x:
+        case ["letrec", [*_], _]:
+            return True
+        case _:
+            return False
+
+
+def is_lambda(x):
+    match x:
+        case ["lambda", [*_], _]:
+            return True
+        case _:
+            return False
+
+
+def is_app(x, env):
+    match x:
+        case [rator, *_]:
+            try:
+                lookup(rator, env)
+                return True
+            except KeyError:
+                return False
+        case _:
+            return False
+
+
+def make_initial_env(vars=None, vals=None):
+    vars = vars or ()
+    vals = vals or ()
+    return [(x[0], x[1]) for x in zip(vars, vals, strict=True)]
 
 
 def emit_program(p, emit):
-    emit_function_header("L_scheme_entry", emit)
-    emit_expr(-WORDSIZE, EMPTY_ENV, p, emit)
-    emit(1 >> Line("ret"))
     emit_function_header("scheme_entry", emit)
     emit(1 >> Line("movq %rsp, %rcx") // "save the C stack pointer")
     emit(1 >> Line("movq %rdi, %rsp") // "rdi has the stack_base arg")
     emit(1 >> Line("call L_scheme_entry"))
     emit(1 >> Line("movq %rcx, %rsp") // "restore the C stack pointer")
     emit(1 >> Line("ret"))
+    if is_letrec(p):
+        emit_letrec(p, emit)
+    else:
+        emit_scheme_entry(p, make_initial_env(), emit)
 
 
-def emit_function_header(name, emit):
+def emit_scheme_entry(expr, env, emit):
+    emit_function_header("L_scheme_entry", emit)
+    emit_expr(-WORDSIZE, env, expr, emit)
+    emit(1 >> Line("ret"))
+
+
+def emit_function_header(name, emit, comment=""):
     emit(1 >> Line(".text"))
     emit(Line(f".globl {name}"))
     emit(1 >> Line(f".type {name}, @function"))
-    emit(Line(f"{name}:"))
+    emit(Line(f"{name}:") // comment)
 
 
 def emit_expr(si, env, expr, emit):
@@ -298,6 +339,8 @@ def emit_expr(si, env, expr, emit):
         emit_let(si, env, expr, emit)
     elif is_let_star(expr):
         emit_let_star(si, env, expr, emit)
+    elif is_app(expr, env):
+        emit_app(si, env, expr, emit)
     else:
         raise ValueError(f"Unknown expression: {expr}")
 
@@ -310,7 +353,9 @@ def emit_primcall(si, env, x, emit):
     primitive = PRIMITIVES[x[0]]
     if len(x[1:]) != primitive["nargs"]:
         raise TypeError(f"{x[0]}: wrong number of args")
-    return primitive["emitter"](si, env, *x[1:], emit)
+    emit(1 >> Line() // f"begin {x[0]}")
+    primitive["emitter"](si, env, *x[1:], emit)
+    emit(1 >> Line() // f"end {x[0]}")
 
 
 @primitive
@@ -471,11 +516,11 @@ def emit_binargs(si, env, arg1, arg2, emit):
 
 
 def emit_stack_save(si, emit, source="rax"):
-    emit(1 >> Line(f"movq %{source}, {si}(%rsp)"))
+    emit(1 >> Line(f"movq %{source}, {si}(%rsp)") // "stack save")
 
 
-def emit_stack_load(si, emit, dest="rax"):
-    emit(1 >> Line(f"movq {si}(%rsp), %{dest}"))
+def emit_stack_load(si, emit, dest="rax", comment=""):
+    emit(1 >> Line(f"movq {si}(%rsp), %{dest}") // comment)
 
 
 @primitive
@@ -644,10 +689,65 @@ def lookup(var, env):
     for x, si in env:
         if x == var:
             return si
+    raise KeyError(f"'{var}' not in env: {env!r}")
 
 
 def emit_variable_ref(env, expr, emit):
     if (si := lookup(expr, env)) is not None:
-        emit_stack_load(si, emit)
+        emit_stack_load(si, emit, comment=f"lookup {expr.name}")
     else:
-        raise TypeError(f"Unbound {expr}")
+        raise LookupError(f"Unbound {expr}")
+
+
+def emit_letrec(expr, emit):
+    _, bindings, body = expr
+    lvars = [x[0] for x in bindings]
+    lambdas = [x[1] for x in bindings]
+    labels = [Label.unique() for _ in lvars]
+    env = make_initial_env(lvars, labels)
+    for lvar, lam, label in zip(lvars, lambdas, labels, strict=True):
+        emit_lambda(env, lam, label, emit, comment=f"lambda@{lvar}")
+    emit_scheme_entry(body, env, emit)
+
+
+def emit_lambda(env, expr, label, emit, comment=""):
+    emit_function_header(label, emit, comment=comment)
+    _, formals, body = expr
+    si = -WORDSIZE
+    for formal, si in zip(formals, count(si, -WORDSIZE)):
+        env = extend_env(formal, si, env)
+    emit_expr(next_stack_index(si), env, body, emit)
+    emit(1 >> Line("ret"))
+
+
+def emit_app(si, env, expr, emit):
+    def emit_arguments(si, args):
+        match args:
+            case first, *rest:
+                emit_expr(si, env, first, emit)
+                emit_stack_save(si, emit)
+                return emit_arguments(next_stack_index(si), rest)
+            case _:
+                return
+
+    rator, *args = expr
+    emit(1 >> Line() // f"begin {lookup(rator, env)} ({rator}) prelude")
+    emit_arguments(
+        next_stack_index(si),  # leave one cell empty for the return address
+        args,
+    )
+    # adjust rsp so call puts the return address in the empty cell
+    emit_adjust_base(si + WORDSIZE, emit)
+    emit_call(lookup(rator, env), emit)
+    emit_adjust_base(-(si + WORDSIZE), emit)
+
+
+def emit_adjust_base(offset, emit):
+    if offset > 0:
+        emit(1 >> Line(f"add ${offset}, %rsp"))
+    elif offset < 0:
+        emit(1 >> Line(f"sub ${-offset}, %rsp"))
+
+
+def emit_call(label, emit):
+    emit(1 >> Line(f"call {label}"))
