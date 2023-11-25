@@ -221,7 +221,7 @@ def emit_program(p, emit):
     emit(1 >> Line("movq %rdi, %rsp") // "rdi has the stack_base arg")
     emit(1 >> Line("call L_scheme_entry"))
     emit(1 >> Line("movq %rcx, %rsp") // "restore the C stack pointer")
-    emit(1 >> Line("ret"))
+    emit_ret(emit)
     if is_letrec(p):
         emit_letrec(p, emit)
     else:
@@ -230,8 +230,7 @@ def emit_program(p, emit):
 
 def emit_scheme_entry(expr, env, emit):
     emit_function_header("L_scheme_entry", emit)
-    emit_expr(-WORDSIZE, env, expr, emit)
-    emit(1 >> Line("ret"))
+    emit_expr(-WORDSIZE, env, expr, tail=True, emit=emit)
 
 
 def emit_function_header(name, emit, comment=""):
@@ -241,25 +240,28 @@ def emit_function_header(name, emit, comment=""):
     emit(Line(f"{name}:") // comment)
 
 
-def emit_expr(si, env, expr, emit):
+def emit_expr(si, env, expr, tail, emit):
     if is_immediate(expr):
         emit_immediate(expr, emit)
+        emit_ret_when(tail, emit)
     elif is_variable(expr):
         emit_variable_ref(env, expr, emit)
+        emit_ret_when(tail, emit)
     elif is_primcall(expr):
         emit_primcall(si, env, expr, emit)
+        emit_ret_when(tail, emit)
     elif is_if(expr):
-        emit_if(si, env, expr, emit)
+        emit_if(si, env, expr, tail=tail, emit=emit)
     elif is_and(expr):
-        emit_expr(si, env, desugar_and(expr), emit)
+        emit_expr(si, env, desugar_and(expr), tail=tail, emit=emit)
     elif is_or(expr):
-        emit_expr(si, env, desugar_or(expr), emit)
+        emit_expr(si, env, desugar_or(expr), tail=tail, emit=emit)
     elif is_let(expr):
-        emit_let(si, env, expr, emit)
+        emit_let(si, env, expr, tail=tail, emit=emit)
     elif is_let_star(expr):
-        emit_let_star(si, env, expr, emit)
+        emit_let_star(si, env, expr, tail=tail, emit=emit)
     elif is_app(expr, env):
-        emit_app(si, env, expr, emit)
+        emit_app(si, env, expr, tail=tail, emit=emit)
     else:
         raise ValueError(f"Unknown expression: {expr}")
 
@@ -280,21 +282,21 @@ def emit_primcall(si, env, x, emit):
 @primitive
 @scheme_name("fxadd1")
 def emit_fxadd1(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"addq ${immediate_rep(1)}, %rax"))
 
 
 @primitive
 @scheme_name("fxsub1")
 def emit_fxsub1(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"subq ${immediate_rep(1)}, %rax"))
 
 
 @primitive
 @scheme_name("fixnum->char")
 def emit_fixnum2char(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"shlq ${CHARSHIFT - FXSHIFT}, %rax"))
     emit(1 >> Line(f"orq ${CHARTAG}, %rax"))
 
@@ -302,7 +304,7 @@ def emit_fixnum2char(si, env, arg, emit):
 @primitive
 @scheme_name("char->fixnum")
 def emit_char2fixnum(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"shrq ${CHARSHIFT - FXSHIFT}, %rax"))
 
 
@@ -325,7 +327,7 @@ def emit_boolcmp(emit, cmp="e"):
 @primitive
 @scheme_name("null?")
 def emit_nullp(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"cmp ${NULL}, %rax"))
     emit_boolcmp(emit)
 
@@ -334,7 +336,7 @@ def emit_nullp(si, env, arg, emit):
 @primitive
 @scheme_name("fixnum?")
 def emit_fixnump(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"andq ${FXMASK}, %rax"))
     emit(1 >> Line(f"cmp ${FXTAG}, %rax"))
     emit_boolcmp(emit)
@@ -344,7 +346,7 @@ def emit_fixnump(si, env, arg, emit):
 @primitive
 @scheme_name("fxzero?")
 def emit_fxzerop(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"cmp ${FXTAG}, %rax") // "0 is all zeros")
     emit_boolcmp(emit)
 
@@ -353,7 +355,7 @@ def emit_fxzerop(si, env, arg, emit):
 @primitive
 @scheme_name("boolean?")
 def emit_booleanp(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"and ${BOOL_MASK}, %al") // "F & F and F & T both evaluate to F")
     emit(1 >> Line(f"cmp ${BOOL_F}, %al"))
     emit_boolcmp(emit)
@@ -363,7 +365,7 @@ def emit_booleanp(si, env, arg, emit):
 @primitive
 @scheme_name("char?")
 def emit_charp(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"and ${CHARMASK}, %al"))
     emit(1 >> Line(f"cmp ${CHARTAG}, %al"))
     emit_boolcmp(emit)
@@ -372,7 +374,7 @@ def emit_charp(si, env, arg, emit):
 @primitive
 @scheme_name("not")
 def emit_not(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line(f"cmp ${BOOL_F}, %al"))
     emit_boolcmp(emit)
 
@@ -380,26 +382,36 @@ def emit_not(si, env, arg, emit):
 @primitive
 @scheme_name("fxlognot")
 def emit_fxlognot(si, env, arg, emit):
-    emit_expr(si, env, arg, emit)
+    emit_expr(si, env, arg, tail=False, emit=emit)
     emit(1 >> Line("not %rax"))
     emit(1 >> Line("and $0xFC, %al") // "reset the tag bits")
 
 
-def emit_if(si, env, program, emit):
+def emit_if(si, env, program, tail, emit):
     _, test, consequent, alternative = program
     alt_label = Label.unique()
     end_label = Label.unique()
     emit(Line() // f"begin if {alt_label} {end_label}")
     # TODO: (if (fxzero? e0) conseq alt) causes an extra comparison,
     # and extra work creating a #t or #f value that we don't use
-    emit_expr(si, env, test, emit)
+    # write the test
+    emit_expr(si, env, test, tail=False, emit=emit)
+
+    # write the consequent
     emit(1 >> Line(f"cmp ${BOOL_F}, %al") // "compare result of test to False")
     emit(1 >> Line(f"je {alt_label}") // "jump to alt if False")
-    emit_expr(si, env, consequent, emit)
-    emit(1 >> Line(f"jmp {end_label}"))
+    emit_expr(si, env, consequent, tail=tail, emit=emit)
+    if not tail:
+        # if this expression is in tail position the sub-expressions
+        # will eventually return so we don't need the end label
+        emit(1 >> Line(f"jmp {end_label}"))
+
+    # write the alternative
     emit(Line(f"{alt_label}:"))
-    emit_expr(si, env, alternative, emit)
-    emit(Line(f"{end_label}:"))
+    emit_expr(si, env, alternative, tail=tail, emit=emit)
+
+    if not tail:
+        emit(Line(f"{end_label}:"))
     emit(Line() // f"end if {alt_label} {end_label}")
 
 
@@ -429,13 +441,13 @@ def emit_binargs(si, env, arg1, arg2, emit):
 
     arg1 result will be in <si>(%rsp), arg2 in %rax
     """
-    emit_expr(si, env, arg1, emit)
+    emit_expr(si, env, arg1, tail=False, emit=emit)
     emit_stack_save(si, emit)
-    emit_expr(next_stack_index(si), env, arg2, emit)
+    emit_expr(next_stack_index(si), env, arg2, tail=False, emit=emit)
 
 
-def emit_stack_save(si, emit, source="rax"):
-    emit(1 >> Line(f"movq %{source}, {si}(%rsp)") // "stack save")
+def emit_stack_save(si, emit, source="rax", comment="stack save"):
+    emit(1 >> Line(f"movq %{source}, {si}(%rsp)") // comment)
 
 
 def emit_stack_load(si, emit, dest="rax", comment=""):
@@ -566,16 +578,16 @@ def emit_chargte(si, env, arg1, arg2, emit):
     emit_fxgte(si, env, arg1, arg2, emit)
 
 
-def emit_let(si, env, expr, emit):
+def emit_let(si, env, expr, tail, emit):
     def process_let(bindings, si, new_env):
         match bindings:
             case []:
-                return emit_expr(si, new_env, expr[2], emit)
+                return emit_expr(si, new_env, expr[2], tail=tail, emit=emit)
             case [(lhs, rhs), *rest]:
                 if not isinstance(lhs, Var):
                     raise ValueError("lhs of let binding must be a Var")
-                emit_expr(si, env, rhs, emit)
-                emit_stack_save(si, emit)
+                emit_expr(si, env, rhs, tail=False, emit=emit)
+                emit_stack_save(si, emit, comment=f"let bind {lhs.name}")
                 return process_let(
                     rest, next_stack_index(si), extend_env(lhs, si, new_env)
                 )
@@ -583,15 +595,15 @@ def emit_let(si, env, expr, emit):
     return process_let(expr[1], si, env)
 
 
-def emit_let_star(si, env, expr, emit):
+def emit_let_star(si, env, expr, tail, emit):
     def process_let_star(bindings, si, new_env):
         match bindings:
             case []:
-                return emit_expr(si, new_env, expr[2], emit)
+                return emit_expr(si, new_env, expr[2], tail=tail, emit=emit)
             case [(lhs, rhs), *rest]:
                 if not isinstance(lhs, Var):
                     raise ValueError("lhs of let binding must be a Var")
-                emit_expr(si, new_env, rhs, emit)
+                emit_expr(si, new_env, rhs, tail=False, emit=emit)
                 emit_stack_save(si, emit)
                 return process_let_star(
                     rest, next_stack_index(si), extend_env(lhs, si, new_env)
@@ -635,30 +647,36 @@ def emit_lambda(env, expr, label, emit, comment=""):
     si = -WORDSIZE
     for formal, si in zip(formals, count(si, -WORDSIZE)):
         env = extend_env(formal, si, env)
-    emit_expr(next_stack_index(si), env, body, emit)
-    emit(1 >> Line("ret"))
+    emit_expr(next_stack_index(si), env, body, tail=True, emit=emit)
 
 
-def emit_app(si, env, expr, emit):
+def emit_app(si, env, expr, tail, emit):
     def emit_arguments(si, args):
         match args:
             case first, *rest:
-                emit_expr(si, env, first, emit)
+                emit_expr(si, env, first, tail=False, emit=emit)
                 emit_stack_save(si, emit)
                 return emit_arguments(next_stack_index(si), rest)
             case _:
                 return
 
     rator, *args = expr
-    emit(1 >> Line() // f"begin {lookup(rator, env)} ({rator}) prelude")
+    emit(1 >> Line() // f"begin {lookup(rator, env)} ({rator}) prologue")
     emit_arguments(
         next_stack_index(si),  # leave one cell empty for the return address
         args,
     )
-    # adjust rsp so call puts the return address in the empty cell
-    emit_adjust_base(si + WORDSIZE, emit)
-    emit_call(lookup(rator, env), emit)
-    emit_adjust_base(-(si + WORDSIZE), emit)
+    if tail:
+        # shift the args from (si + WORDSIZE)... down to -WORDSIZE(%rsp)...
+        for i in range(1, len(args) + 1):
+            emit(1 >> Line(f"movq {si - i * WORDSIZE}(%rsp), %rax"))
+            emit(1 >> Line(f"movq %rax, {-i * WORDSIZE}(%rsp)"))
+        emit(1 >> Line(f"jmp {lookup(rator, env)}"))
+    else:
+        # adjust rsp so call puts the return address in the empty cell
+        emit_adjust_base(si + WORDSIZE, emit)
+        emit_call(lookup(rator, env), emit)
+        emit_adjust_base(-(si + WORDSIZE), emit)
 
 
 def emit_adjust_base(offset, emit):
@@ -670,3 +688,12 @@ def emit_adjust_base(offset, emit):
 
 def emit_call(label, emit):
     emit(1 >> Line(f"call {label}"))
+
+
+def emit_ret_when(cond, emit):
+    if cond:
+        emit_ret(emit)
+
+
+def emit_ret(emit):
+    emit(1 >> Line("ret"))
