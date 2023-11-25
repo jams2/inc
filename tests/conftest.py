@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from compiler import Writer, emit_program
+from compiler import FileWriter, emit_program
 
 
 @pytest.fixture()
@@ -17,7 +17,7 @@ def compile_and_run(tmp_path, project_root):
         startup = project_root / "startup.c"
         asm_file = tmp_path / "program.s"
         binary = tmp_path / "test"
-        with Writer(asm_file) as writer:
+        with FileWriter(asm_file) as writer:
             emit_program(program, writer.write)
 
         subprocess.run(

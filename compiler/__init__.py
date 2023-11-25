@@ -39,7 +39,7 @@ class StdoutWriter:
         sys.stdout.flush()
 
 
-class Writer:
+class FileWriter:
     def __init__(self, filename):
         self.filename = filename
         self.file = None
