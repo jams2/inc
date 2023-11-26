@@ -623,6 +623,32 @@ def emit_cons(si, env, a, d, emit):
     emit(1 >> Line(f"add ${2 * CDR_OFFSET}, %rbp"))
 
 
+@primitive
+@scheme_name("car")
+def emit_car(si, env, pair, emit):
+    emit_expr(si, env, pair, tail=False, emit=emit)
+    emit(1 >> Line("subq $1, %rax"))
+    emit(1 >> Line("movq 0(%rax), %rax"))
+
+
+@primitive
+@scheme_name("cdr")
+def emit_cdr(si, env, pair, emit):
+    emit_expr(si, env, pair, tail=False, emit=emit)
+    emit(1 >> Line("addq $7, %rax"))
+    emit(1 >> Line("movq 0(%rax), %rax"))
+
+
+@predicate
+@primitive
+@scheme_name("pair?")
+def emit_pairp(si, env, expr, emit):
+    emit_expr(si, env, expr, tail=False, emit=emit)
+    emit(1 >> Line(f"andq ${OBJ_MASK}, %rax"))
+    emit(1 >> Line(f"cmpq ${PAIR_TAG}, %rax"))
+    emit_boolcmp(emit)
+
+
 def emit_let(si, env, expr, tail, emit):
     def process_let(bindings, si, new_env):
         match bindings:
