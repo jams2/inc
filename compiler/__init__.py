@@ -1,8 +1,8 @@
 import string
-from dataclasses import dataclass
 from itertools import count
 
 from .io import Line
+from .var import Var
 
 
 class Label:
@@ -56,11 +56,6 @@ CDR_OFFSET = 8
 
 PRIMITIVES = {}
 PREDICATES = set()
-
-
-@dataclass
-class Var:
-    name: str
 
 
 def next_stack_index(si):
@@ -161,6 +156,14 @@ def is_and(x):
 def is_or(x):
     match x:
         case ("or", *_):
+            return True
+        case _:
+            return False
+
+
+def is_cond(x):
+    match x:
+        case ("cond", *_):
             return True
         case _:
             return False
@@ -284,6 +287,8 @@ def emit_expr(si, env, expr, tail, emit):
         emit_expr(si, env, desugar_and(expr), tail=tail, emit=emit)
     elif is_or(expr):
         emit_expr(si, env, desugar_or(expr), tail=tail, emit=emit)
+    elif is_cond(expr):
+        emit_expr(si, env, desugar_cond(expr), tail=tail, emit=emit)
     elif is_let(expr):
         emit_let(si, env, expr, tail=tail, emit=emit)
     elif is_let_star(expr):
@@ -461,6 +466,16 @@ def desugar_or(expr):
             return rator
         case ["or", rator, *rest]:
             return ("if", rator, rator, desugar_or(["or", *rest]))
+
+
+def desugar_cond(expr):
+    match expr:
+        case ["cond"]:
+            return False
+        case ["cond", (test, result)]:
+            return ["if", test, result, False]
+        case ["cond", (test, result), *rest]:
+            return ["if", test, result, ("cond", *rest)]
 
 
 def emit_binargs(si, env, arg1, arg2, emit):
